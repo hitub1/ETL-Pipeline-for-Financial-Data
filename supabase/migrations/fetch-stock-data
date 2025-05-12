@@ -1,0 +1,133 @@
+import { createClient } from 'npm:@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Initialize Supabase client
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function fetchStockData(symbol: string) {
+  try {
+    // First, verify that the stock exists in our database
+    const { data: stockExists, error: stockError } = await supabase
+      .from('stocks')
+      .select('symbol')
+      .eq('symbol', symbol)
+      .maybeSingle();
+
+    if (stockError) {
+      throw new Error(`Database error: ${stockError.message}`);
+    }
+
+    if (!stockExists) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Stock symbol ${symbol} not found in database` 
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 404,
+        },
+      );
+    }
+
+    // This is a mock implementation. In production, you would:
+    // 1. Use a real financial API (e.g., Alpha Vantage, Yahoo Finance)
+    // 2. Handle rate limits and API keys properly
+    // 3. Implement proper error handling
+    const mockData = {
+      price: Math.random() * 1000,
+      volume: Math.floor(Math.random() * 1000000),
+      pe_ratio: Math.random() * 30,
+      market_cap: Math.random() * 1000000000000,
+      fifty_day_ma: Math.random() * 1000
+    };
+
+    // Use a transaction to ensure all updates succeed or fail together
+    const { error: insertError } = await supabase.rpc('update_stock_data', {
+      p_symbol: symbol,
+      p_price: mockData.price,
+      p_volume: mockData.volume,
+      p_pe_ratio: mockData.pe_ratio,
+      p_market_cap: mockData.market_cap,
+      p_fifty_day_ma: mockData.fifty_day_ma
+    });
+
+    if (insertError) {
+      throw new Error(`Failed to update stock data: ${insertError.message}`);
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, data: mockData }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      },
+    );
+  } catch (error) {
+    console.error('Error in fetchStockData:', error);
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : 'An unexpected error occurred' 
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      },
+    );
+  }
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { 
+      headers: {
+        ...corsHeaders,
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      }
+    });
+  }
+
+  // Only allow POST requests
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 405,
+      },
+    );
+  }
+
+  try {
+    const { symbol } = await req.json();
+    if (!symbol) {
+      return new Response(
+        JSON.stringify({ error: 'Symbol is required' }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        },
+      );
+    }
+
+    return await fetchStockData(symbol);
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Invalid request body' 
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      },
+    );
+  }
+});
